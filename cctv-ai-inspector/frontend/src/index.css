@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-void text-ink-primary font-sans antialiased;
+    background-image: radial-gradient(circle at 15% 0%, rgba(77, 232, 192, 0.05), transparent 40%);
+  }
+
+  ::selection {
+    background: rgba(77, 232, 192, 0.25);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #232933 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #232933;
+    border-radius: 4px;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
