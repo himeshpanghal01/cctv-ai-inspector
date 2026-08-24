@@ -46,6 +46,7 @@ export function analyzeVideo(file, onProgress) {
 
 async function pollAnalysis(jobId, resolve, reject) {
   const startedAt = Date.now();
+  let transientFailures = 0;
   const poll = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/analyze/${jobId}`);
@@ -53,12 +54,17 @@ async function pollAnalysis(jobId, resolve, reject) {
       if (!response.ok) throw new Error(payload.error || 'Analysis job was not found.');
       if (payload.status === 'completed') return resolve(payload);
       if (payload.status === 'failed') return reject(new Error(payload.error));
+      transientFailures = 0;
       if (Date.now() - startedAt > 15 * 60 * 1000) {
         return reject(new Error('Analysis is taking too long. Try a shorter video.'));
       }
       window.setTimeout(poll, 2000);
     } catch (error) {
-      reject(error);
+      if (++transientFailures <= 3 && Date.now() - startedAt < 15 * 60 * 1000) {
+        window.setTimeout(poll, 3000);
+      } else {
+        reject(error);
+      }
     }
   };
   poll();

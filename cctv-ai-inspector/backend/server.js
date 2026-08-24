@@ -78,7 +78,7 @@ const upload = multer({
 // ---------------------------------------------------------------------------
 // Gemini analysis pipeline
 // ---------------------------------------------------------------------------
-const ANALYSIS_PROMPT = `You are a security and surveillance AI. Analyze the provided CCTV footage. Return a JSON object with the following structure:
+const ANALYSIS_PROMPT = `You are a fast CCTV triage AI. Analyze the provided footage efficiently and return only important findings. Do not describe every frame. Return a JSON object with the following structure:
 {
   "summary": "Brief overview of the video",
   "events": [
@@ -90,10 +90,10 @@ const ANALYSIS_PROMPT = `You are a security and surveillance AI. Analyze the pro
     }
   ]
 }
-Extract all spoken audio as text, identify on-screen text (OCR) like license plates or signs, list all detected people/objects, and flag any anomalous or suspicious activity. Order events chronologically by timestamp. Return ONLY the JSON object, no markdown fences, no commentary.`;
+Identify people, vehicles, important objects, readable on-screen text, and suspicious activity. Mention audio only when it contains important speech or an alert; do not transcribe ordinary audio. Return at most 20 events, merge repeated observations, and order events chronologically. Return ONLY the JSON object, no markdown fences, no commentary.`;
 
-const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes ceiling for Gemini to process the upload
+const POLL_INTERVAL_MS = 5000;
+const POLL_TIMEOUT_MS = 20 * 60 * 1000;
 
 async function waitForFileActive(fileName) {
   const startedAt = Date.now();
@@ -144,42 +144,41 @@ function normalizeAnalysis(parsed) {
     }))
     .sort((a, b) => toSeconds(a.timestamp) - toSeconds(b.timestamp));
 
-  return { summary, events: normalizedEvents };
+  return { summary, events: normalizedEvents.slice(0, 20) };
 }
 
 async function analyzeVideoWithGemini(localFilePath, mimeType) {
-  const uploadResult = await fileManager.uploadFile(localFilePath, {
-    mimeType,
-    displayName: path.basename(localFilePath),
-  });
+  let activeFile;
+  try {
+    const uploadResult = await fileManager.uploadFile(localFilePath, {
+      mimeType,
+      displayName: path.basename(localFilePath),
+    });
 
-  const activeFile = await waitForFileActive(uploadResult.file.name);
+    activeFile = await waitForFileActive(uploadResult.file.name);
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3.6-flash',
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.2,
-    },
-  });
-
-  const result = await model.generateContent([
-    {
-      fileData: {
-        fileUri: activeFile.uri,
-        mimeType: activeFile.mimeType,
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.6-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.2,
       },
-    },
-    { text: ANALYSIS_PROMPT },
-  ]);
+    });
 
-  const rawText = result.response.text();
-  const parsed = extractJson(rawText);
+    const result = await model.generateContent([
+      {
+        fileData: {
+          fileUri: activeFile.uri,
+          mimeType: activeFile.mimeType,
+        },
+      },
+      { text: ANALYSIS_PROMPT },
+    ]);
 
-  // Best-effort cleanup of the remote copy — analysis is already complete.
-  fileManager.deleteFile(activeFile.name).catch(() => {});
-
-  return normalizeAnalysis(parsed);
+    return normalizeAnalysis(extractJson(result.response.text()));
+  } finally {
+    if (activeFile) fileManager.deleteFile(activeFile.name).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
