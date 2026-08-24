@@ -44,7 +44,14 @@ const MIME_TYPES_BY_EXTENSION = new Map([
 
 function getSupportedMimeType(file) {
   const extension = path.extname(file.originalname).toLowerCase();
-  return MIME_TYPES_BY_EXTENSION.get(extension) || (file.mimetype.startsWith('video/') ? file.mimetype : null);
+  if (MIME_TYPES_BY_EXTENSION.has(extension)) {
+    return MIME_TYPES_BY_EXTENSION.get(extension);
+  }
+  if (file.mimetype?.startsWith('video/')) {
+    return file.mimetype;
+  }
+  // Some Android browsers send a selected video as a generic binary blob.
+  return file.mimetype === 'application/octet-stream' ? 'video/mp4' : null;
 }
 
 const storage = multer.diskStorage({
@@ -216,11 +223,18 @@ app.post('/api/analyze', (req, res) => {
       });
     } catch (err) {
       console.error('[ANALYZE_ERROR]', err);
+      const errorStatus = Number(err.status || err.statusCode);
       const message =
         err.message === 'GEMINI_PROCESSING_TIMEOUT'
           ? 'Gemini took too long to process this video. Try a shorter clip.'
           : err.message === 'GEMINI_FILE_PROCESSING_FAILED'
-          ? 'Gemini could not process this video file.'
+          ? 'Gemini could not process this video. On Android, export it as MP4 (H.264) and try again.'
+          : errorStatus === 401 || errorStatus === 403
+          ? 'The Gemini API key was rejected. Check the key in Render environment variables.'
+          : errorStatus === 429
+          ? 'Gemini is temporarily rate-limited. Wait a minute and try again.'
+          : errorStatus === 404
+          ? 'The configured Gemini model is unavailable. Check the backend model configuration.'
           : err instanceof SyntaxError
           ? 'The AI response could not be parsed. Please try again.'
           : 'Analysis failed. Please try again.';
