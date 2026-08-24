@@ -26,6 +26,7 @@ if (!GEMINI_API_KEY) {
 
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 const fileManager = GEMINI_API_KEY ? new GoogleAIFileManager(GEMINI_API_KEY) : null;
+const analysisJobs = new Map();
 
 // ---------------------------------------------------------------------------
 // Express app setup
@@ -188,6 +189,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, geminiConfigured: Boolean(GEMINI_API_KEY) });
 });
 
+app.get('/api/analyze/:jobId', (req, res) => {
+  const job = analysisJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'Analysis job was not found.' });
+  return res.json(job);
+});
+
 app.post('/api/analyze', (req, res) => {
   upload.single('video')(req, res, async (uploadErr) => {
     if (uploadErr) {
@@ -212,19 +219,30 @@ app.post('/api/analyze', (req, res) => {
 
     const localPath = req.file.path;
     const videoUrl = `/uploads/${req.file.filename}`;
+    const jobId = `job-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    analysisJobs.set(jobId, {
+      status: 'processing',
+      fileName: req.file.originalname,
+      videoUrl,
+    });
 
-    try {
+    // Return before Gemini processing starts so Render does not time out long jobs.
+    res.status(202).json({ jobId, status: 'processing' });
+
+    (async () => {
+      try {
       const mimeType = getSupportedMimeType(req.file);
       const analysis = await analyzeVideoWithGemini(localPath, mimeType);
-      return res.json({
+      analysisJobs.set(jobId, {
+        status: 'completed',
         videoUrl,
         fileName: req.file.originalname,
         ...analysis,
       });
-    } catch (err) {
-      console.error('[ANALYZE_ERROR]', err);
-      const errorStatus = Number(err.status || err.statusCode);
-      const message =
+      } catch (err) {
+        console.error('[ANALYZE_ERROR]', err);
+        const errorStatus = Number(err.status || err.statusCode);
+        const message =
         err.message === 'GEMINI_PROCESSING_TIMEOUT'
           ? 'Gemini took too long to process this video. Try a shorter clip.'
           : err.message === 'GEMINI_FILE_PROCESSING_FAILED'
@@ -238,8 +256,9 @@ app.post('/api/analyze', (req, res) => {
           : err instanceof SyntaxError
           ? 'The AI response could not be parsed. Please try again.'
           : 'Analysis failed. Please try again.';
-      return res.status(502).json({ error: message });
-    }
+        analysisJobs.set(jobId, { status: 'failed', error: message });
+      }
+    })();
   });
 });
 
