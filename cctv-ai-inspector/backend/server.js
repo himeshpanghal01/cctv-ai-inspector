@@ -35,12 +35,17 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOAD_DIR));
 
-const ACCEPTED_MIME_TYPES = new Set([
-  'video/mp4',
-  'video/webm',
-  'video/quicktime',
-  'video/x-matroska',
+const MIME_TYPES_BY_EXTENSION = new Map([
+  ['.mp4', 'video/mp4'],
+  ['.webm', 'video/webm'],
+  ['.mov', 'video/quicktime'],
+  ['.mkv', 'video/x-matroska'],
 ]);
+
+function getSupportedMimeType(file) {
+  const extension = path.extname(file.originalname).toLowerCase();
+  return MIME_TYPES_BY_EXTENSION.get(extension) || (file.mimetype.startsWith('video/') ? file.mimetype : null);
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
@@ -55,7 +60,7 @@ const upload = multer({
   storage,
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!ACCEPTED_MIME_TYPES.has(file.mimetype)) {
+    if (!getSupportedMimeType(file)) {
       return cb(new Error('UNSUPPORTED_FORMAT'));
     }
     cb(null, true);
@@ -202,7 +207,8 @@ app.post('/api/analyze', (req, res) => {
     const videoUrl = `/uploads/${req.file.filename}`;
 
     try {
-      const analysis = await analyzeVideoWithGemini(localPath, req.file.mimetype);
+      const mimeType = getSupportedMimeType(req.file);
+      const analysis = await analyzeVideoWithGemini(localPath, mimeType);
       return res.json({
         videoUrl,
         fileName: req.file.originalname,
