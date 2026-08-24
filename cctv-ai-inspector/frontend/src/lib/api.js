@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_BASE || '';
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  (import.meta.env.PROD ? 'https://cctv-ai-inspector.onrender.com' : '');
 
 /**
  * Uploads a video file for AI analysis and returns the parsed insights payload.
